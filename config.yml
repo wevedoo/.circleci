@@ -6,3 +6,114 @@ version: 2
      steps:
        - checkout
        - run: echo "A first hello"
+# This code is licensed from CircleCI to the user under the MIT license. See
+# https://circleci.com/orbs/registry/licensing for details.
+commands:
+  install:
+    description: Install the CircleCI CLI
+    parameters:
+      debug:
+        default: false
+        description: |
+          Extra output for orb developers
+        type: boolean
+      install-dir:
+        default: /usr/local/bin
+        description: |
+          Directory in which to install the CircleCI CLI
+        type: string
+      version:
+        default: latest
+        description: |
+          Version of CircleCI CLI to install, defaults to the latest release. If specifying a version other than latest, provide a full release tag, as listed at https://api.github.com/repos/CircleCI-Public/circleci-cli/tags, e.g., `v0.1.5581`.
+        type: string
+    steps:
+    - run:
+        command: |
+          if [[ $EUID == 0 ]]; then export SUDO=""; else export SUDO="sudo"; fi
+
+          # grab CircleCI CLI version
+          if [[ "<<parameters.version>>" == "latest" ]]; then
+            # extract latest version from GitHub releases API
+            CIRCLECI_CLI_VERSION=$(curl \
+              --silent --show-error --location --fail --retry 3 \
+              https://api.github.com/repos/CircleCI-Public/circleci-cli/releases/latest | \
+              jq '.tag_name' | sed -E 's/"//g')
+          else
+            CIRCLECI_CLI_VERSION=<<parameters.version>>
+            echo "Selected version of CircleCI CLI is $CIRCLECI_CLI_VERSION"
+          fi
+
+          # check if CircleCI CLI needs to be installed
+          if command -v circleci<<^parameters.debug>> > /dev/null 2>&1<</parameters.debug>>; then
+            if circleci version | grep "${CIRCLECI_CLI_VERSION:1}"<<^parameters.debug>> > /dev/null 2>&1<</parameters.debug>>; then
+              echo "circleci $CIRCLECI_CLI_VERSION is already installed"
+              exit 0
+            else
+              echo "A different version of the CircleCI CLI is installed ($(circleci version)); updating it"
+              $SUDO rm -f "$(which circleci)"
+              curl -fLSs https://circle.ci/cli | $SUDO bash
+              echo "CircleCI CLI version $(circleci --skip-update-check version) has been installed to $(which circleci)"
+            fi
+          fi
+        name: Install CircleCI CLI
+  setup:
+    description: |
+      Run `circleci setup` to configure the CircleCI CLI (CLI must be installed first): https://circleci-public.github.io/circleci-cli/circleci_setup.html
+    parameters:
+      host:
+        default: https://circleci.com
+        description: |
+          Full URL of your CircleCI host (use the default value unless you are using a hosted installation of CircleCI)
+        type: string
+      token:
+        default: CIRCLECI_CLI_TOKEN
+        description: |
+          Name of environment variable storing a CircleCI API token to use for CircleCI CLI commands that require authentication
+        type: env_var_name
+    steps:
+    - run:
+        command: |
+          circleci setup --no-prompt \
+            --host <<parameters.host>> \
+            --token $<<parameters.token>>
+        name: Configure CircleCI CLI
+description: |
+  Install and configure the CircleCI command-line interface. Repository: https://github.com/CircleCI-Public/circleci-cli-orb
+examples:
+  executor-command-example:
+    description: |
+      Run a job inside the CircleCI CLI container, via this orb's executor. In another job, use the orb to install the CLI.
+    usage:
+      jobs:
+        use-executor:
+          executor: cli/default
+          steps:
+          - run: echo "this job is using the orb's default executor"
+        use-install-command:
+          docker:
+          - image: circleci/circleci-cli:latest
+          steps:
+          - cli/install
+          - run: echo "the CLI is now installed"
+      orbs:
+        cli: circleci/circleci-cli@x.y.z
+      version: 2.1
+      workflows:
+        cli-orb-example:
+          jobs:
+          - use-executor
+          - use-install-command
+executors:
+  default:
+    description: |
+      The circleci-cli Docker image, which includes the CircleCI CLI
+    docker:
+    - image: circleci/circleci-cli:<<parameters.tag>>
+    parameters:
+      tag:
+        default: latest
+        description: |
+          What version of the CircleCI CLI Docker image? For full list, see https://hub.docker.com/r/circleci/circleci-cli/tags
+        type: string
+version: 2.1
